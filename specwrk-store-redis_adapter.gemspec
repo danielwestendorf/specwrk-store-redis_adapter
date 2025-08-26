@@ -29,7 +29,6 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "specwrk"
   spec.add_dependency "redis-client"
-  spec.add_dependency "redlock"
 
   spec.add_development_dependency "standard"
 end

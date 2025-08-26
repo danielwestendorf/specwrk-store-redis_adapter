@@ -9,8 +9,6 @@ require "redis-client"
 module Specwrk
   class Store
     class RedisAdapter < Specwrk::Store::BaseAdapter
-      VERSION = "0.1.0"
-
       REDIS_KEY_DELIMITER = "||||"
 
       @connection_pools = {}
