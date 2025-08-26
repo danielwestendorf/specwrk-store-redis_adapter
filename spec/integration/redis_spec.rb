@@ -49,7 +49,7 @@ RSpec.describe "Redis Adapter" do
 
     instance["baz"] = true
 
-    expect(instance.keys).to eq(["foobar", "baz"])
+    expect(instance.keys).to match_array(["foobar", "baz"])
     expect(instance.empty?).to eq(false)
 
     instance.delete("baz")
