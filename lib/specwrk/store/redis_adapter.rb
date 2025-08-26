@@ -30,9 +30,7 @@ module Specwrk
               sleep(rand(0.001..0.09))
             end
 
-            yield
-
-            client.unlock(lock)
+            yield.tap { client.unlock(lock) }
           end
         end
 

@@ -28,9 +28,11 @@ RSpec.describe "Redis Adapter" do
     expect(barrier.length).to eq(1)
 
     foo = 1
-    Specwrk::Store::RedisAdapter.with_lock(uri, "foobar") do
+    result = Specwrk::Store::RedisAdapter.with_lock(uri, "foobar") do
       foo += 1
     end
+
+    expect(result).to eq(2)
 
     expect(barrier.length).to eq(2)
     thread.join
