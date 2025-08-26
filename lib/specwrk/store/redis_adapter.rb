@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require "json"
+require "securerandom"
 
 require "specwrk/store/base_adapter"
 require "redis-client"
-require "redlock"
 
 module Specwrk
   class Store
@@ -19,18 +19,22 @@ module Specwrk
       class << self
         def with_lock(uri, key)
           connection_pool_for(uri).with do |connection|
-            client = Redlock::Client.new(
-              [connection],
-              retry_count: lock_retry_count,
-              retry_delay: lock_retry_delay,
-              retry_jitter: lock_retry_jitter
-            )
-
-            until (lock = client.lock("specwrk-lock-#{key}", lock_ttl))
-              sleep(rand(0.001..0.09))
+            id = SecureRandom.uuid
+            queue = "specwrk-lock-#{key}"
+            connection.pipelined do |pipeline|
+              pipeline.call("RPUSH", queue, id)
+              pipeline.call("EXPIRE", queue, 10) # only set if no expireat already
             end
 
-            yield.tap { client.unlock(lock) }
+            # wait for our id to be first in line or the queue to expire
+            sleep(rand(0.001..0.012)) until [id, nil].include? connection.call("LINDEX", queue, 0)
+
+            yield
+          ensure
+            connection.pipelined do |pipeline|
+              pipeline.call("LPOP", queue)
+              pipeline.call("EXPIRE", queue, 10) # keeps the queue fresh when things are moving
+            end
           end
         end
 
@@ -46,26 +50,6 @@ module Specwrk
 
         def reset_connections!
           @connection_pools.clear
-        end
-
-        private
-
-        # In ms
-        def lock_ttl
-          ENV.fetch("SPECWRK_REDIS_ADAPTER_LOCK_TTL", "5000").to_i
-        end
-
-        # See https://www.rubydoc.info/gems/redlock/Redlock/Client#initialize-instance_method
-        def lock_retry_count
-          ENV.fetch("SPECWRK_REDIS_ADAPTER_LOCK_RETRY_COUNT", "3").to_i
-        end
-
-        def lock_retry_delay
-          ENV.fetch("SPECWRK_REDIS_ADAPTER_LOCK_RETRY_DELAY", "100").to_i
-        end
-
-        def lock_retry_jitter
-          ENV.fetch("SPECWRK_REDIS_ADAPTER_LOCK_RETRY_JITTER", "10").to_i
         end
       end
 

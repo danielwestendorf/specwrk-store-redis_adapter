@@ -14,18 +14,8 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
   describe ".with_lock" do
     let(:key) { "foobar" }
-    let(:env) do
-      {
-        "SPECWRK_REDIS_ADAPTER_LOCK_TTL" => "1",
-        "SPECWRK_REDIS_ADAPTER_LOCK_RETRY_COUNT" => "42",
-        "SPECWRK_REDIS_ADAPTER_LOCK_RETRY_DELAY" => "43",
-        "SPECWRK_REDIS_ADAPTER_LOCK_RETRY_JITTER" => "44"
-      }
-    end
 
     it "locks and yields" do
-      stub_const("ENV", env)
-
       expect(described_class).to receive(:connection_pool_for)
         .with(uri)
         .and_return(connection_pool_dbl)
@@ -33,27 +23,17 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       expect(connection_pool_dbl).to receive(:with)
         .and_yield(redis_client_dbl)
 
-      expect(Redlock::Client).to receive(:new)
-        .with(
-          [redis_client_dbl],
-          retry_count: 42,
-          retry_delay: 43,
-          retry_jitter: 44
-        ).and_return(redlock_client_dbl)
+      id = "uuid-123"
+      expect(SecureRandom).to receive(:uuid)
+        .and_return(id)
 
-      expect(redlock_client_dbl).to receive(:lock)
-        .with("specwrk-lock-foobar", 1)
-        .and_return(false)
+      expect(redis_client_dbl).to receive(:pipelined) do |&blk|
+        blk.call(double("pipeline", call: true))
+      end.twice
 
-      expect(described_class).to receive(:sleep)
-        .and_return(true)
-
-      expect(redlock_client_dbl).to receive(:lock)
-        .with("specwrk-lock-foobar", 1)
-        .and_return("the-lock-info")
-
-      expect(redlock_client_dbl).to receive(:unlock)
-        .with("the-lock-info")
+      expect(redis_client_dbl).to receive(:call)
+        .with("LINDEX", instance_of(String), 0)
+        .and_return(id)
 
       foo = 1
       described_class.with_lock(uri, key) do
