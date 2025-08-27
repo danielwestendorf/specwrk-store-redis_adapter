@@ -17,6 +17,8 @@ module Specwrk
       class << self
         def with_lock(uri, key)
           connection_pool_for(uri).with do |connection|
+            Thread.current[:connection] = connection
+
             id = SecureRandom.uuid
             queue = "specwrk-lock-#{key}"
             connection.pipelined do |pipeline|
@@ -33,6 +35,8 @@ module Specwrk
               pipeline.call("LPOP", queue)
               pipeline.call("EXPIRE", queue, 10) # keeps the queue fresh when things are moving
             end
+
+            Thread.current[:connection] = nil
           end
         end
 
@@ -118,8 +122,12 @@ module Specwrk
       private
 
       def with_connection
-        self.class.connection_pool_for(uri).with do |connection|
-          yield connection
+        if Thread.current[:connection]
+          yield Thread.current[:connection]
+        else
+          self.class.connection_pool_for(uri).with do |connection|
+            yield connection
+          end
         end
       end
 
