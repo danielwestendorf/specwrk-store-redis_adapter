@@ -9,8 +9,6 @@ require "redis-client"
 module Specwrk
   class Store
     class RedisAdapter < Specwrk::Store::BaseAdapter
-      REDIS_KEY_DELIMITER = "||||"
-
       @connection_pools = {}
       @mutex = Mutex.new
 
@@ -57,32 +55,34 @@ module Specwrk
 
       def [](key)
         with_connection do |redis|
-          value = redis.call("GET", encode_key(key))
+          value = redis.call("HGET", scope, key)
           JSON.parse(value, symbolize_names: true) if value
         end
       end
 
       def []=(key, value)
         with_connection do |redis|
-          redis.call("SET", encode_key(key), JSON.generate(value))
+          redis.call("HSET", scope, key, JSON.generate(value))
         end
       end
 
       def keys
-        [].tap do |collected|
-          scan_for("#{scope}#{REDIS_KEY_DELIMITER}*") { |k| collected << decode_key(k) }
+        with_connection do |redis|
+          redis.call("HKEYS", scope)
         end
       end
 
       def clear
-        delete(*keys)
+        with_connection do |redis|
+          redis.call("DEL", scope)
+        end
       end
 
       def delete(*keys)
         return if keys.length.zero?
 
         with_connection do |redis|
-          redis.call("DEL", *keys.map { |key| encode_key key })
+          redis.call("HDEL", scope, *keys)
         end
       end
 
@@ -94,7 +94,7 @@ module Specwrk
         return {} if read_keys.length.zero?
 
         values = with_connection do |redis|
-          redis.call("MGET", *read_keys.map { |key| encode_key(key) })
+          redis.call("HMGET", scope, *read_keys)
         end
 
         result = {}
@@ -111,12 +111,14 @@ module Specwrk
         return if hash.nil? || hash.length.zero?
 
         with_connection do |redis|
-          redis.call("MSET", *hash.flat_map { |key, value| [encode_key(key), JSON.generate(value)] })
+          redis.call("HMSET", scope, *hash.flat_map { |key, value| [key, JSON.generate(value)] })
         end
       end
 
       def empty?
-        keys.length.zero?
+        with_connection do |redis|
+          redis.call("HLEN", scope).zero?
+        end
       end
 
       private
@@ -127,25 +129,6 @@ module Specwrk
         else
           self.class.connection_pool_for(uri).with do |connection|
             yield connection
-          end
-        end
-      end
-
-      def encode_key(key)
-        [scope, REDIS_KEY_DELIMITER, key].join
-      end
-
-      def decode_key(key)
-        key.split(REDIS_KEY_DELIMITER).last
-      end
-
-      def scan_for(match)
-        with_connection do |redis|
-          cursor = "0"
-          loop do
-            cursor, batch = redis.call("SCAN", cursor, "MATCH", match, "COUNT", 5_000)
-            batch.each { |k| yield k }
-            break if cursor == "0"
           end
         end
       end
