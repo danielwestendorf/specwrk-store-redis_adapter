@@ -25,7 +25,7 @@ module Specwrk
             end
 
             # wait for our id to be first in line or the queue to expire
-            sleep(rand(0.001..0.012)) until [id, nil].include? connection.call("LINDEX", queue, 0)
+            Thread.pass until [id, nil].include? connection.call("LINDEX", queue, 0)
 
             yield
           ensure
@@ -43,7 +43,7 @@ module Specwrk
 
           @mutex.synchronize do
             @connection_pools[uri] ||= RedisClient.config(url: uri).new_pool(
-              size: ENV.fetch("SPECWRK_THREAD_COUNT", "4").to_i
+              size: ENV.fetch("SPECWRK_THREAD_COUNT", ENV.fetch("SPECWRK_COUNT", "4")).to_i
             )
           end
         end
