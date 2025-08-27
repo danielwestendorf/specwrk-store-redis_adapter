@@ -1,10 +1,6 @@
 # frozen_string_literal: true
 
 RSpec.describe Specwrk::Store::RedisAdapter do
-  def encoded_key(key)
-    "#{scope}#{described_class::REDIS_KEY_DELIMITER}#{key}"
-  end
-
   let(:uri) { "redis://localhost:6327" }
   let(:connection_pool_dbl) { instance_double(RedisClient::Pooled) }
   let(:redis_client_dbl) { instance_double(RedisClient) }
@@ -68,7 +64,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
       before do
         allow(redis_client_dbl).to receive(:call)
-          .with("GET", "#{scope}#{described_class::REDIS_KEY_DELIMITER}foo")
+          .with("HGET", scope, "foo")
           .and_return(JSON.generate({a: 1}))
       end
 
@@ -80,7 +76,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
       before do
         allow(redis_client_dbl).to receive(:call)
-          .with("SET", encoded_key("foo"), JSON.generate({a: 1}))
+          .with("HSET", scope, "foo", JSON.generate({a: 1}))
           .and_return("fizzbuzz")
       end
 
@@ -90,28 +86,20 @@ RSpec.describe Specwrk::Store::RedisAdapter do
     describe "#keys" do
       subject { instance.keys }
 
-      let(:match) { "#{scope}#{described_class::REDIS_KEY_DELIMITER}*" }
+      before do
+        allow(redis_client_dbl).to receive(:call)
+          .with("HKEYS", scope)
+          .and_return(keys)
+      end
 
       context "when keys exist across multiple scan batches" do
-        before do
-          expect(redis_client_dbl).to receive(:call)
-            .with("SCAN", "0", "MATCH", match, "COUNT", 5_000)
-            .and_return(["1", [encoded_key("a"), encoded_key("b")]])
+        let(:keys) { %w[c a b] }
 
-          expect(redis_client_dbl).to receive(:call)
-            .with("SCAN", "1", "MATCH", match, "COUNT", 5_000)
-            .and_return(["0", [encoded_key("c")]])
-        end
-
-        it { is_expected.to eq(%w[a b c]) }
+        it { is_expected.to match_array(%w[a b c]) }
       end
 
       context "when there are no keys" do
-        before do
-          expect(redis_client_dbl).to receive(:call)
-            .with("SCAN", "0", "MATCH", match, "COUNT", 5_000)
-            .and_return(["0", []])
-        end
+        let(:keys) { [] }
 
         it { is_expected.to eq([]) }
       end
@@ -121,11 +109,8 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       subject { instance.clear }
 
       it "deletes all keys" do
-        expect(instance).to receive(:keys)
-          .and_return([1, 2, 3, 4])
-
-        expect(instance).to receive(:delete)
-          .with(1, 2, 3, 4)
+        expect(redis_client_dbl).to receive(:call)
+          .with("DEL", scope)
 
         instance.clear
       end
@@ -140,12 +125,12 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         it { is_expected.to eq(nil) }
       end
 
-      context "no keys" do
+      context "some keys" do
         let(:keys) { [1, 2, 3, 4] }
 
         before do
           allow(redis_client_dbl).to receive(:call)
-            .with("DEL", encoded_key(1), encoded_key(2), encoded_key(3), encoded_key(4))
+            .with("HDEL", scope, 1, 2, 3, 4)
             .and_return("foobar")
         end
 
@@ -167,11 +152,8 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         before do
           allow(redis_client_dbl).to receive(:call)
             .with(
-              "MSET",
-              encoded_key(:a), JSON.generate({a: 1}),
-              encoded_key(:b), JSON.generate({b: 2})
-            )
-            .and_return("foobar")
+              "HMSET", scope, :a, JSON.generate({a: 1}), :b, JSON.generate({b: 2})
+            ).and_return("foobar")
         end
 
         it { is_expected.to eq("foobar") }
@@ -205,7 +187,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         before do
           allow(redis_client_dbl).to receive(:call)
             .with(
-              "MGET", encoded_key("a"), encoded_key("b"), encoded_key("c")
+              "HMGET", scope, "a", "b", "c"
             ).and_return([
               JSON.generate({x: 1}),
               nil,
@@ -222,7 +204,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         before do
           allow(redis_client_dbl).to receive(:call)
             .with(
-              "MGET", encoded_key("x"), encoded_key("y")
+              "HMGET", scope, "x", "y"
             ).and_return([nil, nil])
         end
 
@@ -234,8 +216,10 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       subject { instance.empty? }
 
       before do
-        allow(instance).to receive(:keys)
-          .and_return(keys)
+        allow(redis_client_dbl).to receive(:call)
+          .with(
+            "HLEN", scope
+          ).and_return(keys.length)
       end
 
       context "no keys" do
@@ -243,6 +227,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
         it { is_expected.to eq(true) }
       end
+
       context "keys" do
         let(:keys) { [1] }
 
