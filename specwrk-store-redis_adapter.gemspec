@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name = "specwrk-store-redis_adapter"
-  spec.version = "0.0.4"
+  spec.version = "0.0.5"
   spec.authors = ["Daniel Westendorf"]
   spec.email = ["daniel@prowestech.com"]
 
