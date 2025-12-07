@@ -25,7 +25,7 @@ module Specwrk
             end
 
             # wait for our id to be first in line or the queue to expire
-            Thread.pass until [id, nil].include? connection.call("LINDEX", queue, 0)
+            sleep(0.01 * rand) until [id, nil].include? connection.call("LINDEX", queue, 0)
 
             yield
           ensure
