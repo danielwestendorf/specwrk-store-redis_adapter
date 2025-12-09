@@ -27,8 +27,9 @@ Gem::Specification.new do |spec|
 
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "specwrk"
+  spec.add_dependency "specwrk", "~> 0.19.1"
   spec.add_dependency "redis-client"
 
   spec.add_development_dependency "standard"
+  spec.add_development_dependency "msgpack"
 end

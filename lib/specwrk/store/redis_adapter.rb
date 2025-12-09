@@ -4,6 +4,7 @@ require "json"
 require "securerandom"
 
 require "specwrk/store/base_adapter"
+require "specwrk/store/serializer"
 require "redis-client"
 
 module Specwrk
@@ -56,13 +57,13 @@ module Specwrk
       def [](key)
         with_connection do |redis|
           value = redis.call("HGET", scope, key)
-          JSON.parse(value, symbolize_names: true) if value
+          self.class.serializer.load(value) if value
         end
       end
 
       def []=(key, value)
         with_connection do |redis|
-          redis.call("HSET", scope, key, JSON.generate(value))
+          redis.call("HSET", scope, key, self.class.serializer.dump(value))
         end
       end
 
@@ -101,7 +102,7 @@ module Specwrk
 
         read_keys.zip(values).each do |key, value|
           next if value.nil?
-          result[key] = JSON.parse(value, symbolize_names: true)
+          result[key] = self.class.serializer.load(value)
         end
 
         result
@@ -111,7 +112,7 @@ module Specwrk
         return if hash.nil? || hash.length.zero?
 
         with_connection do |redis|
-          redis.call("HMSET", scope, *hash.flat_map { |key, value| [key, JSON.generate(value)] })
+          redis.call("HMSET", scope, *hash.flat_map { |key, value| [key, self.class.serializer.dump(value)] })
         end
       end
 
@@ -131,6 +132,13 @@ module Specwrk
             yield connection
           end
         end
+      end
+
+      # override
+      def scope
+        return @scope if self.class.serializer.adapter_name == "json"
+
+        [self.class.serializer.adapter_name, @scope].join("-")
       end
     end
   end

@@ -48,7 +48,10 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
   describe "with_connection" do
     let(:scope) { "foobar" }
+    let(:adapter_name) { (described_class.serializer.adapter_name == "json") ? nil : described_class.serializer.adapter_name }
+    let(:serializer_scope) { [adapter_name, scope].compact.join("-") }
     let(:instance) { described_class.new(uri, scope) }
+    let(:serializer) { described_class.serializer }
 
     before do
       allow(described_class).to receive(:connection_pool_for)
@@ -64,8 +67,8 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
       before do
         allow(redis_client_dbl).to receive(:call)
-          .with("HGET", scope, "foo")
-          .and_return(JSON.generate({a: 1}))
+          .with("HGET", serializer_scope, "foo")
+          .and_return(serializer.dump({a: 1}))
       end
 
       it { is_expected.to eq(a: 1) }
@@ -76,7 +79,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
       before do
         allow(redis_client_dbl).to receive(:call)
-          .with("HSET", scope, "foo", JSON.generate({a: 1}))
+          .with("HSET", serializer_scope, "foo", serializer.dump({a: 1}))
           .and_return("fizzbuzz")
       end
 
@@ -88,7 +91,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
       before do
         allow(redis_client_dbl).to receive(:call)
-          .with("HKEYS", scope)
+          .with("HKEYS", serializer_scope)
           .and_return(keys)
       end
 
@@ -110,7 +113,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
       it "deletes all keys" do
         expect(redis_client_dbl).to receive(:call)
-          .with("DEL", scope)
+          .with("DEL", serializer_scope)
 
         instance.clear
       end
@@ -130,7 +133,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
 
         before do
           allow(redis_client_dbl).to receive(:call)
-            .with("HDEL", scope, 1, 2, 3, 4)
+            .with("HDEL", serializer_scope, 1, 2, 3, 4)
             .and_return("foobar")
         end
 
@@ -152,7 +155,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         before do
           allow(redis_client_dbl).to receive(:call)
             .with(
-              "HMSET", scope, :a, JSON.generate({a: 1}), :b, JSON.generate({b: 2})
+              "HMSET", serializer_scope, :a, serializer.dump({a: 1}), :b, serializer.dump({b: 2})
             ).and_return("foobar")
         end
 
@@ -187,11 +190,11 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         before do
           allow(redis_client_dbl).to receive(:call)
             .with(
-              "HMGET", scope, "a", "b", "c"
+              "HMGET", serializer_scope, "a", "b", "c"
             ).and_return([
-              JSON.generate({x: 1}),
+              serializer.dump({x: 1}),
               nil,
-              JSON.generate({z: 3})
+              serializer.dump({z: 3})
             ])
         end
 
@@ -204,7 +207,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         before do
           allow(redis_client_dbl).to receive(:call)
             .with(
-              "HMGET", scope, "x", "y"
+              "HMGET", serializer_scope, "x", "y"
             ).and_return([nil, nil])
         end
 
@@ -218,7 +221,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       before do
         allow(redis_client_dbl).to receive(:call)
           .with(
-            "HLEN", scope
+            "HLEN", serializer_scope
           ).and_return(keys.length)
       end
 
@@ -232,6 +235,33 @@ RSpec.describe Specwrk::Store::RedisAdapter do
         let(:keys) { [1] }
 
         it { is_expected.to eq(false) }
+      end
+    end
+
+    describe "scope serialization" do
+      subject { instance.send(:scope) }
+
+      let(:instance) { described_class.new(uri, scope) }
+
+      around do |example|
+        original = ENV["SPECWRK_STORE_SERIALIZER"]
+        ENV["SPECWRK_STORE_SERIALIZER"] = serializer
+        described_class.reset_serializer!
+        example.run
+        ENV["SPECWRK_STORE_SERIALIZER"] = original
+        described_class.reset_serializer!
+      end
+
+      context "when using the default json serializer" do
+        let(:serializer) { "json" }
+
+        it { is_expected.to eq(scope) }
+      end
+
+      context "when SPECWRK_STORE_SERIALIZER is set to msgpack" do
+        let(:serializer) { "msgpack" }
+
+        it { is_expected.to eq(serializer_scope) }
       end
     end
   end
