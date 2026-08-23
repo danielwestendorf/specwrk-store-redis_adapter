@@ -2,6 +2,6 @@
 
 module Specwrk
   class Store
-    REDIS_ADAPTER_VERSION = "0.2.0"
+    REDIS_ADAPTER_VERSION = "0.2.1"
   end
 end

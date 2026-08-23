@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-23
+
 - Allow Specwrk versions newer than 0.19 while retaining 0.19.4 as the minimum.
 
 ## [0.2.0] - 2026-08-23
