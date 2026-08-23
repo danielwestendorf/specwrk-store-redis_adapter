@@ -40,6 +40,28 @@ RSpec.describe "Redis Adapter" do
     expect(foo).to eq(2)
   end
 
+  it "does not release a lock owned by another caller" do
+    lock_key = "specwrk-lock-ownership-#{SecureRandom.uuid}"
+
+    Specwrk::Store::RedisAdapter.connection_pool_for(uri).with do |connection|
+      connection.call("SET", lock_key, "owner", "PX", 10_000)
+      connection.call("SCRIPT", "LOAD", Specwrk::Store::RedisAdapter::UNLOCK_SCRIPT)
+
+      result = connection.call(
+        "EVALSHA",
+        Specwrk::Store::RedisAdapter::UNLOCK_SCRIPT_SHA,
+        1,
+        lock_key,
+        "not-the-owner"
+      )
+
+      expect(result).to eq(0)
+      expect(connection.call("GET", lock_key)).to eq("owner")
+    ensure
+      connection.call("DEL", lock_key)
+    end
+  end
+
   it "instance methods" do
     instance = Specwrk::Store::RedisAdapter.new(uri, "foobar")
     instance.clear

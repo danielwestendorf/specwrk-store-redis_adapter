@@ -4,14 +4,14 @@ RSpec.describe Specwrk::Store::RedisAdapter do
   let(:uri) { "redis://localhost:6327" }
   let(:connection_pool_dbl) { instance_double(RedisClient::Pooled) }
   let(:redis_client_dbl) { instance_double(RedisClient) }
-  let(:redlock_client_dbl) { instance_double(Redlock::Client) }
 
   before { described_class.reset_connections! }
 
   describe ".with_lock" do
     let(:key) { "foobar" }
+    let(:lock_id) { "uuid-123" }
 
-    it "locks and yields" do
+    before do
       expect(described_class).to receive(:connection_pool_for)
         .with(uri)
         .and_return(connection_pool_dbl)
@@ -19,17 +19,24 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       expect(connection_pool_dbl).to receive(:with)
         .and_yield(redis_client_dbl)
 
-      id = "uuid-123"
       expect(SecureRandom).to receive(:uuid)
-        .and_return(id)
+        .and_return(lock_id)
+    end
 
-      expect(redis_client_dbl).to receive(:pipelined) do |&blk|
-        blk.call(double("pipeline", call: true))
-      end.twice
+    it "locks and yields" do
+      expect(redis_client_dbl).to receive(:call)
+        .with(
+          "EVALSHA",
+          described_class::LOCK_SCRIPT_SHA,
+          1,
+          "specwrk-lock-#{key}",
+          lock_id,
+          described_class::LOCK_TTL_MILLISECONDS
+        ).and_return(1)
 
       expect(redis_client_dbl).to receive(:call)
-        .with("LINDEX", instance_of(String), 0)
-        .and_return(id)
+        .with("EVALSHA", described_class::UNLOCK_SCRIPT_SHA, 1, "specwrk-lock-#{key}", lock_id)
+        .and_return(1)
 
       foo = 1
       described_class.with_lock(uri, key) do
@@ -37,6 +44,91 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       end
 
       expect(foo).to eq(2)
+    end
+
+    it "retries until the lock is acquired" do
+      expect(redis_client_dbl).to receive(:call)
+        .with(
+          "EVALSHA",
+          described_class::LOCK_SCRIPT_SHA,
+          1,
+          "specwrk-lock-#{key}",
+          lock_id,
+          described_class::LOCK_TTL_MILLISECONDS
+        ).and_return(0, 1)
+
+      expect(described_class).to receive(:sleep)
+      expect(redis_client_dbl).to receive(:call)
+        .with("EVALSHA", described_class::UNLOCK_SCRIPT_SHA, 1, "specwrk-lock-#{key}", lock_id)
+        .and_return(1)
+
+      described_class.with_lock(uri, key) { true }
+    end
+
+    it "unlocks when the block raises" do
+      allow(redis_client_dbl).to receive(:call)
+        .with(
+          "EVALSHA",
+          described_class::LOCK_SCRIPT_SHA,
+          1,
+          "specwrk-lock-#{key}",
+          lock_id,
+          described_class::LOCK_TTL_MILLISECONDS
+        ).and_return(1)
+
+      expect(redis_client_dbl).to receive(:call)
+        .with("EVALSHA", described_class::UNLOCK_SCRIPT_SHA, 1, "specwrk-lock-#{key}", lock_id)
+        .and_return(1)
+
+      expect do
+        described_class.with_lock(uri, key) { raise "boom" }
+      end.to raise_error("boom")
+    end
+
+    it "does not unlock when acquisition fails" do
+      expect(redis_client_dbl).to receive(:call)
+        .with(
+          "EVALSHA",
+          described_class::LOCK_SCRIPT_SHA,
+          1,
+          "specwrk-lock-#{key}",
+          lock_id,
+          described_class::LOCK_TTL_MILLISECONDS
+        ).and_raise("connection failed")
+
+      expect do
+        described_class.with_lock(uri, key) { true }
+      end.to raise_error("connection failed")
+    end
+
+    it "loads a missing script and retries it by its content version" do
+      lock_arguments = [
+        "EVALSHA",
+        described_class::LOCK_SCRIPT_SHA,
+        1,
+        "specwrk-lock-#{key}",
+        lock_id,
+        described_class::LOCK_TTL_MILLISECONDS
+      ]
+
+      expect(redis_client_dbl).to receive(:call)
+        .with(*lock_arguments)
+        .and_raise(RedisClient::NoScriptError, "NOSCRIPT script missing")
+        .ordered
+      expect(redis_client_dbl).to receive(:call)
+        .with("SCRIPT", "LOAD", described_class::LOCK_SCRIPT)
+        .and_return(described_class::LOCK_SCRIPT_SHA)
+        .ordered
+      expect(redis_client_dbl).to receive(:call)
+        .with(*lock_arguments)
+        .and_return(1)
+        .ordered
+      expect(redis_client_dbl).to receive(:call)
+        .with("EVALSHA", described_class::UNLOCK_SCRIPT_SHA, 1, "specwrk-lock-#{key}", lock_id)
+        .and_return(1)
+        .ordered
+
+      described_class.with_lock(uri, key) { true }
     end
   end
 

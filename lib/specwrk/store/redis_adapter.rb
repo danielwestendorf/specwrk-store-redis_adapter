@@ -2,6 +2,7 @@
 
 require "json"
 require "securerandom"
+require "digest/sha1"
 
 require "specwrk/store/base_adapter"
 require "specwrk/store/serializer"
@@ -10,6 +11,25 @@ require "redis-client"
 module Specwrk
   class Store
     class RedisAdapter < Specwrk::Store::BaseAdapter
+      LOCK_TTL_MILLISECONDS = 10_000
+      LOCK_RETRY_DELAY = 0.01
+      LOCK_SCRIPT = <<~LUA
+        if redis.call("SET", KEYS[1], ARGV[1], "NX", "PX", ARGV[2]) then
+          return 1
+        end
+
+        return 0
+      LUA
+      UNLOCK_SCRIPT = <<~LUA
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+          return redis.call("DEL", KEYS[1])
+        end
+
+        return 0
+      LUA
+      LOCK_SCRIPT_SHA = Digest::SHA1.hexdigest(LOCK_SCRIPT)
+      UNLOCK_SCRIPT_SHA = Digest::SHA1.hexdigest(UNLOCK_SCRIPT)
+
       @connection_pools = {}
       @mutex = Mutex.new
 
@@ -19,23 +39,19 @@ module Specwrk
             Thread.current[:connection] = connection
 
             id = SecureRandom.uuid
-            queue = "specwrk-lock-#{key}"
-            connection.pipelined do |pipeline|
-              pipeline.call("RPUSH", queue, id)
-              pipeline.call("EXPIRE", queue, 10) # only set if no expireat already
-            end
+            lock_key = "specwrk-lock-#{key}"
+            locked = false
 
-            # wait for our id to be first in line or the queue to expire
-            sleep(0.01 * rand) until [id, nil].include? connection.call("LINDEX", queue, 0)
+            sleep(LOCK_RETRY_DELAY * rand) until obtain_lock(connection, lock_key, id)
 
+            locked = true
             yield
           ensure
-            connection.pipelined do |pipeline|
-              pipeline.call("LPOP", queue)
-              pipeline.call("EXPIRE", queue, 10) # keeps the queue fresh when things are moving
+            begin
+              release_lock(connection, lock_key, id) if locked
+            ensure
+              Thread.current[:connection] = nil
             end
-
-            Thread.current[:connection] = nil
           end
         end
 
@@ -51,6 +67,23 @@ module Specwrk
 
         def reset_connections!
           @connection_pools.clear
+        end
+
+        private
+
+        def obtain_lock(connection, key, id)
+          eval_script(connection, LOCK_SCRIPT, LOCK_SCRIPT_SHA, key, id, LOCK_TTL_MILLISECONDS) == 1
+        end
+
+        def release_lock(connection, key, id)
+          eval_script(connection, UNLOCK_SCRIPT, UNLOCK_SCRIPT_SHA, key, id)
+        end
+
+        def eval_script(connection, script, sha, key, *arguments)
+          connection.call("EVALSHA", sha, 1, key, *arguments)
+        rescue RedisClient::NoScriptError
+          connection.call("SCRIPT", "LOAD", script)
+          retry
         end
       end
 
