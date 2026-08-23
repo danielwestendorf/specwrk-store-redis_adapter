@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "lib/specwrk/store/redis_adapter/version"
+
 Gem::Specification.new do |spec|
   spec.name = "specwrk-store-redis_adapter"
-  spec.version = "0.1.0"
+  spec.version = Specwrk::Store::REDIS_ADAPTER_VERSION
   spec.authors = ["Daniel Westendorf"]
   spec.email = ["daniel@prowestech.com"]
 
@@ -27,7 +29,7 @@ Gem::Specification.new do |spec|
 
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "specwrk", "~> 0.19.1"
+  spec.add_dependency "specwrk", "~> 0.19.4"
   spec.add_dependency "redis-client"
 
   spec.add_development_dependency "standard"
