@@ -6,13 +6,14 @@ require "digest/sha1"
 
 require "specwrk/store/base_adapter"
 require "specwrk/store/serializer"
+require "specwrk/store/redis_adapter/version"
 require "redis-client"
 
 module Specwrk
   class Store
     class RedisAdapter < Specwrk::Store::BaseAdapter
+      VERSION = REDIS_ADAPTER_VERSION
       LOCK_TTL_MILLISECONDS = 10_000
-      LOCK_RETRY_DELAY = 0.01
       LOCK_SCRIPT = <<~LUA
         if redis.call("SET", KEYS[1], ARGV[1], "NX", "PX", ARGV[2]) then
           return 1
@@ -42,9 +43,9 @@ module Specwrk
             lock_key = "specwrk-lock-#{key}"
             locked = false
 
-            sleep(LOCK_RETRY_DELAY * rand) until obtain_lock(connection, lock_key, id)
+            locked = obtain_lock(connection, lock_key, id)
+            raise Specwrk::Store::LockUnavailableError unless locked
 
-            locked = true
             yield
           ensure
             begin
