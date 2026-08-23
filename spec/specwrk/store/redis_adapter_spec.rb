@@ -46,7 +46,7 @@ RSpec.describe Specwrk::Store::RedisAdapter do
       expect(foo).to eq(2)
     end
 
-    it "retries until the lock is acquired" do
+    it "raises when the lock is unavailable" do
       expect(redis_client_dbl).to receive(:call)
         .with(
           "EVALSHA",
@@ -55,14 +55,19 @@ RSpec.describe Specwrk::Store::RedisAdapter do
           "specwrk-lock-#{key}",
           lock_id,
           described_class::LOCK_TTL_MILLISECONDS
-        ).and_return(0, 1)
+        ).and_return(0)
 
-      expect(described_class).to receive(:sleep)
-      expect(redis_client_dbl).to receive(:call)
+      expect(described_class).not_to receive(:sleep)
+      expect(redis_client_dbl).not_to receive(:call)
         .with("EVALSHA", described_class::UNLOCK_SCRIPT_SHA, 1, "specwrk-lock-#{key}", lock_id)
-        .and_return(1)
 
-      described_class.with_lock(uri, key) { true }
+      yielded = false
+
+      expect do
+        described_class.with_lock(uri, key) { yielded = true }
+      end.to raise_error(Specwrk::Store::LockUnavailableError)
+
+      expect(yielded).to eq(false)
     end
 
     it "unlocks when the block raises" do

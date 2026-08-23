@@ -13,31 +13,27 @@ RSpec.describe "Redis Adapter" do
     expect(foo).to eq(2)
   end
 
-  it "sleeps until the lock becomes available" do
-    barrier = Queue.new
+  it "raises when the lock is unavailable" do
+    lock_acquired = Queue.new
+    release_lock = Queue.new
 
     thread = Thread.new do
       Specwrk::Store::RedisAdapter.with_lock(uri, "foobar") do
-        barrier.push(1)
-        sleep 0.25
-        barrier.push(1)
+        lock_acquired.push(true)
+        release_lock.pop
       end
     end
 
-    Thread.pass until barrier.length.positive? # wait for other thread to get lock
-    expect(barrier.length).to eq(1)
+    begin
+      lock_acquired.pop
 
-    foo = 1
-    result = Specwrk::Store::RedisAdapter.with_lock(uri, "foobar") do
-      foo += 1
+      expect do
+        Specwrk::Store::RedisAdapter.with_lock(uri, "foobar") { true }
+      end.to raise_error(Specwrk::Store::LockUnavailableError)
+    ensure
+      release_lock.push(true)
+      thread.join
     end
-
-    expect(result).to eq(2)
-
-    expect(barrier.length).to eq(2)
-    thread.join
-
-    expect(foo).to eq(2)
   end
 
   it "does not release a lock owned by another caller" do
