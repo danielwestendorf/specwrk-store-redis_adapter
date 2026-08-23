@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
 
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "specwrk", "~> 0.19.4"
+  spec.add_dependency "specwrk", ">= 0.19.4"
   spec.add_dependency "redis-client"
 
   spec.add_development_dependency "standard"

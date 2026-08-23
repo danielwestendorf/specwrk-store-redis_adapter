@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- Allow Specwrk versions newer than 0.19 while retaining 0.19.4 as the minimum.
+
 ## [0.2.0] - 2026-08-23
 
 - Replace the Redis queue lock with atomic, token-owned Lua lock and unlock scripts cached and versioned by content SHA.
